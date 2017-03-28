@@ -281,6 +281,14 @@ class Node(APIObject):
             return self.obj["spec"]["unschedulable"]
         return False
 
+    @property
+    def ip(self):
+        addresses = self.obj["status"]["addresses"]
+        for address_data in addresses:
+            if address_data["type"] == "InternalIP":
+                return address_data["address"]
+        return False
+
     @unschedulable.setter
     def unschedulable(self, value):
         self.obj["spec"]["unschedulable"] = value
@@ -291,6 +299,20 @@ class Node(APIObject):
 
     def uncordon(self):
         self.unschedulable = False
+
+    def drain(self):
+        node_ip = self.ip
+        namespaces = Namespace.objects(self.api)
+        for namespace in namespaces:
+            pods = Pod.objects(self.api, namespace=namespace.name).all()
+            for pod in pods:
+                annotations = pod.obj["metadata"]["annotations"]
+                if annotations and annotations.get("kubernetes.io/created-by"):
+                    created_by = json.loads(annotations.get("kubernetes.io/created-by"))
+                    pod_type = created_by["reference"]["kind"]
+                    host_ip = pod.obj["status"].get("hostIP")
+                    if host_ip == node_ip and pod_type != "DaemonSet":
+                        pod.delete()
 
 
 class Pod(NamespacedAPIObject):
